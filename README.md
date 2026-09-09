@@ -1,5 +1,7 @@
 # 银狼 Agent 学习版
 
+[简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
+
 这是一个用于学习 **Agent、工具调用与桌面应用集成** 的个人二次开发项目。
 
 它以 [March7thAssistant](https://github.com/moesnow/March7thAssistant) 为运行框架，在其 PySide6 桌面应用中加入了一个以「银狼」为人设的 Agent 对话页面。原项目的游戏自动化功能、素材、工作流和相关文档并非本仓库作者原创或维护范围。

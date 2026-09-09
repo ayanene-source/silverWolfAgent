@@ -1,144 +1,63 @@
-<div align="center">
-  <h1 align="center">
-    <img src="./assets/screenshot/March7th.png" width="200">
-    <br/>
-    March7thAssistant
-  </h1>
-  <a href="https://trendshift.io/repositories/3892" target="_blank"><img src="https://trendshift.io/api/badge/repositories/3892" alt="moesnow%2FMarch7thAssistant | Trendshift" style="width: 200px; height: 46px;" width="250" height="46"/></a>
-</div>
+# 銀狼 Agent 学習版
 
-<br/>
+[简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
-<div align="center">
-🌟 右上の Star を押すと、GitHub で更新通知を受け取れます。
-</div>
+これは、**Agent、ツール呼び出し、デスクトップアプリ統合**を学ぶための個人二次開発プロジェクトです。
 
-<div align="center">
-    <img src="assets/screenshot/star.gif" alt="Star" width="186" height="60">
-</div>
+[March7thAssistant](https://github.com/moesnow/March7thAssistant) をアプリケーション基盤として利用し、その PySide6 デスクトップアプリに「銀狼」をペルソナとする Agent チャット画面を追加しています。元プロジェクトのゲーム自動化機能、アセット、ワークフロー、および関連ドキュメントは、このリポジトリの作者によるオリジナル作品・保守対象ではありません。
 
-<br/>
+## このリポジトリで追加したもの
 
-<div align="center">
+- ストリーミング応答と会話履歴に対応した銀狼 Agent チャット UI。
+- DeepSeek モデルの接続と、LangChain によるモデル・ツール呼び出しの構成。
+- ゲーム状態の確認、利用可能なタスクの一覧、ゲーム起動、デイリータスク実行、実行中タスク停止に限定したツール。
+- 実際の操作を行うすべてのツールに対する、アプリ内での明示的なユーザー確認。
+- モデルリクエストによってデスクトップ UI をブロックしないための専用 Agent スレッド。
+- Agent モジュールの基本テストと、プロジェクト構造の学習メモ。
 
-[简体中文](./README.md) | [繁體中文](./README_TW.md) | [English](./README_EN.md) | **日本語** | [한국어](./README_KR.md)
+## 範囲と安全性
 
-**このドキュメントは簡体字中国語版をもとに AI で翻訳しています。最終更新日: 2026-04-24。差異がある場合は簡体字中国語版を優先してください。**
+これは学習プロジェクトであり、単体のゲーム自動化製品ではありません。Agent が呼び出せるのは許可リストにあるツールのみで、任意の Python 実行、任意ファイルへのアクセス、システムコマンドの実行はできません。また、明示的に公開されていないゲームタスクを実行することもありません。
 
-**ゲーム内言語は現在、簡体字中国語のみ対応しています。**
+自動化機能を使用する前に、ゲームの利用規約とアカウントに対する潜在的なリスクを各自で確認してください。
 
-クイックスタート: [使用チュートリアル](https://m7a.top/#/assets/docs/Tutorial_ja)
+## セットアップと起動
 
-困ったときは先にこちらを確認してください: [FAQ](https://m7a.top/#/assets/docs/FAQ_ja)
+Python 3.12 以降を推奨します。プロジェクトのルートで依存関係をインストールし、デスクトップアプリを起動します。
 
-</div>
-
-## 機能紹介
-
-- **日常**: 開拓力消化、デイリー訓練、報酬受け取り、委託、フィールド探索
-- **週常**: 歴戦余韻、貨幣戦争、差分宇宙、混沌の記憶、虚構叙事、末日の幻影
-- **雲・星穹鉄道**: バックグラウンド実行、ヘッドレス実行、Docker 実行に対応
-- **ガチャ記録エクスポート**: [UIGF](https://uigf.org/zh/standards/uigf.html) / [SRGF](https://uigf.org/zh/standards/srgf.html) 標準に対応
-- **ツールボックス**: 自動会話、FPS アンロック、交換コード
-- デイリー訓練などの完了状況で **通知送信** に対応
-- タスク更新時や開拓力が指定値まで回復したときの **自動起動** に対応
-- タスク完了後の **音声通知、ゲーム自動終了、シャットダウンなど** に対応
-
-詳細は GUI 設定または [設定ファイル](assets/config/config.example.yaml) を参照してください｜QQ 群 [リンク](https://qm.qq.com/q/C3IryUWCQw) TG 群 [リンク](https://t.me/+ZgH5zpvFS8o0NGI1) Bilibili [リンク](https://space.bilibili.com/3706960664857075)
-
-## 画面イメージ
-
-![README](assets/screenshot/README.png)
-
-## 注意事項
-
-- 不具合があれば [Issue](https://github.com/moesnow/March7thAssistant/issues) へ、質問や相談は [Discussions](https://github.com/moesnow/March7thAssistant/discussions) へどうぞ。チャットグループは常時確認していません。
-- [PR](https://github.com/moesnow/March7thAssistant/pulls) は歓迎します。送る前に [貢献ガイド](CONTRIBUTING.md) を読んでください。
-
-## ダウンロードとインストール
-
-[Releases](https://github.com/moesnow/March7thAssistant/releases/latest) から最新版をダウンロードして解凍し、三月七アイコンの `March7th Launcher.exe` をダブルクリックして GUI を開きます。
-
-## ソースから実行
-
-完全な初心者であれば、上の配布版を使ってください。この先は見なくて構いません。
-
-Python 3.12 以上を推奨します。
-
-Windows でターミナルから起動する場合は、管理者権限で PowerShell、Windows Terminal、または CMD を開くことを推奨します。Windows 11 24H2 以降であれば [Sudo for Windows](https://learn.microsoft.com/zh-cn/windows/advanced-settings/sudo/) も利用できます。
-
-```cmd
-# Installation (using venv is recommended)
-git clone --recurse-submodules https://github.com/moesnow/March7thAssistant
-cd March7thAssistant
-pip install -r requirements.txt
+```powershell
+python -m pip install -r requirements.txt
 python app.py
-python main.py
-
-# Update
-git pull
-git submodule update --init --recursive
 ```
 
-`uv` を使う場合は、プロジェクト付属の `pyproject.toml` ワークフローをそのまま使うのがおすすめです。
+Agent を使用する前に、DeepSeek API キーを環境変数に設定します。
 
-```cmd
-# Installation (using uv)
-git clone --recurse-submodules https://github.com/moesnow/March7thAssistant
-cd March7thAssistant
-uv sync
-
-# GUI を起動
-uv run python app.py
-
-# CLI ヘルプを表示
-uv run python main.py -h
-
-# 完全実行を開始
-uv run python main.py
-
-# デイリー訓練を実行
-uv run python main.py daily
+```powershell
+$env:DEEPSEEK_API_KEY = "あなたの API Key"
 ```
 
-<details>
-<summary>開発関連</summary>
+または、ローカルの `config.yaml` に `agent_api_key` を設定できます。この個人設定ファイルは Git の管理対象外です。実際のキーは絶対にコミットしないでください。
 
-crop パラメータで使う切り抜き座標は、ツールボックスのスクリーンショット機能で取得できます。
+`assets/config/config.example.yaml` では、次のサンプル設定を調整できます。
 
-</details>
+- `agent_model`：モデル名。
+- `agent_temperature`：応答のランダム性。
+- `agent_history_limit`：保持する会話ターン数。
+- `agent_base_url`：互換 API エンドポイント。空欄の場合は既定のエンドポイントを使用します。
 
----
+## 学習の入口
 
-このプロジェクトが気に入ったら、WeChat で作者にコーヒーをご馳走できます ☕
+| 場所 | 役割 |
+| --- | --- |
+| `app/silver_wolf_interface.py` | Agent チャット UI と確認カード。 |
+| `app/agent/chat_worker.py` | モデルリクエストを GUI スレッドから分離。 |
+| `module/agent/runtime.py` | Agent のストリーミング実行とツール呼び出し処理。 |
+| `module/agent/tools.py` | モデルに公開する許可リストのツール。 |
+| `module/agent/coordinator.py` | GUI スレッドの調整、ユーザー確認、タスクのライフサイクル。 |
+| `项目结构与学习指南.md` | 元のフレームワークの読解ルートと学習メモ。 |
 
-支援は開発と保守の大きな助けになります。
+## 謝辞とライセンス
 
-![sponsor](assets/app/images/sponsor.jpg)
+このリポジトリは [moesnow/March7thAssistant](https://github.com/moesnow/March7thAssistant) の派生作品であり、[GNU GPL v3.0](LICENSE) の下で配布されます。元プロジェクトとそのサブモジュールには、それぞれの著者、著作権表示、ライセンスがあります。利用、改変、再配布の際は、これらの表示を保持し、該当するライセンスに従ってください。
 
----
-
-## 関連プロジェクト
-
-March7thAssistant は以下のオープンソースプロジェクトおよび実行時依存に支えられています。保守者と貢献者の皆さんに感謝します。
-
-- 模擬宇宙自動化 [https://github.com/CHNZYX/Auto_Simulated_Universe](https://github.com/CHNZYX/Auto_Simulated_Universe): 模擬宇宙関連機能を提供
-- フィールド探索自動化 [https://github.com/linruowuyin/Fhoe-Rail](https://github.com/linruowuyin/Fhoe-Rail): 鋤大地関連機能を提供
-- OCR 文字認識 [https://github.com/RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR): ゲーム内文字認識を提供
-- GUI コンポーネントライブラリ [https://github.com/zhiyiYo/PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets): 主要な UI コンポーネントと操作体験を提供
-- Mirror酱 [https://github.com/MirrorChyan/docs](https://github.com/MirrorChyan/docs): 更新確認、配布、CDN 加速関連機能を提供
-- 画像処理と自動化関連依存 `OpenCV`、`PyAutoGUI` など: スクリーンショット取得、画像処理、基本的な自動化を提供
-- 推論高速化関連依存 `ONNX Runtime`、`OpenVINO`: OCR とモデル推論に CPU / GPU 高速化を提供
-
-このほかにも `requirements.txt` には多くの低レベル依存が含まれています。ここに挙げていないプロジェクトにも感謝します。
-
-## Contributors
-<a href="https://github.com/moesnow/March7thAssistant/graphs/contributors">
-
-  <img src="https://contrib.rocks/image?repo=moesnow/March7thAssistant" />
-
-</a>
-
-## Stargazers over time
-
-[![Star History](https://starchart.cc/moesnow/March7thAssistant.svg?variant=adaptive)](https://starchart.cc/moesnow/March7thAssistant)
+本プロジェクトは、miHoYo、HoYoverse、および『崩壊：スターレイル』とは一切関係ありません。
