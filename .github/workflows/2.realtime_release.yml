@@ -1,0 +1,101 @@
+name: Build realtime release
+
+# 触发条件：手动触发或推送触发
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "uv.lock"
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+    env:
+      PYTHONHASHSEED: 0
+      SOURCE_DATE_EPOCH: 315532800
+      MARCH7TH_LOG_LEVEL: DEBUG
+      MARCH7TH_BROWSER_DOWNLOAD_USE_MIRROR: false
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      # 签出代码
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: "false"
+          fetch-depth: 0
+
+      # 检查版本文件是否被修改
+      - name: Check if version.txt was changed
+        id: check_version
+        run: |
+          $changedFiles = git diff HEAD~1 HEAD --name-only
+          if ($changedFiles -match 'assets[/\\]config[/\\]version\.txt') {
+            Write-Host "version.txt was changed in the latest commit, skipping the build"
+            echo "should_build=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "version.txt was not changed, proceeding with the build"
+            echo "should_build=true" >> $env:GITHUB_OUTPUT
+          }
+
+      # 设置 uv 和 Python 环境
+      - name: Set up uv
+        if: steps.check_version.outputs.should_build == 'true'
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: "0.11.15"
+          python-version: "3.14.5"
+          enable-cache: true
+          cache-python: true
+          prune-cache: false
+
+      # 安装依赖
+      - name: Install dependencies
+        if: steps.check_version.outputs.should_build == 'true'
+        run: |
+          uv sync --group build
+          uv run python build.py --task ocr
+
+      # 并行生成程序
+      - name: Generate program
+        if: steps.check_version.outputs.should_build == 'true'
+        run: |
+          $p1 = Start-Process -FilePath "uv" -ArgumentList 'run pyinstaller --distpath ".\dist" ".\March7th Assistant.spec" -y' -PassThru -NoNewWindow
+          $p2 = Start-Process -FilePath "uv" -ArgumentList 'run pyinstaller --distpath ".\dist" ".\March7th Launcher.spec" -y' -PassThru -NoNewWindow
+          $p3 = Start-Process -FilePath "uv" -ArgumentList 'run pyinstaller --distpath ".\dist\March7thAssistant" ".\March7th Updater.spec" -y' -PassThru -NoNewWindow
+          $p1.WaitForExit(); $p2.WaitForExit(); $p3.WaitForExit()
+          if ($p1.ExitCode -ne 0 -or $p2.ExitCode -ne 0 -or $p3.ExitCode -ne 0) {
+            Write-Host "Exit codes: Assistant=$($p1.ExitCode) Launcher=$($p2.ExitCode) Updater=$($p3.ExitCode)"
+            exit 1
+          }
+
+      # 移动资源到dist目录
+      - name: Move assets to dist directory
+        if: steps.check_version.outputs.should_build == 'true'
+        run: |
+          Copy-Item -Path ".\dist\March7th Assistant\*" -Destination ".\dist\March7thAssistant\" -Recurse -Force
+          Copy-Item -Path ".\dist\March7th Launcher\*" -Destination ".\dist\March7thAssistant\" -Recurse -Force
+          Copy-Item -Path ".\assets\" -Destination ".\dist\March7thAssistant\assets\" -Recurse -Force
+          Copy-Item -Path ".\README.md" -Destination ".\dist\March7thAssistant\" -Force
+
+      # 创建压缩包
+      - name: Create archive
+        if: steps.check_version.outputs.should_build == 'true'
+        run: |
+          Rename-Item -Path .\dist\March7thAssistant -NewName March7thAssistant_${{ github.run_number }}
+          .\assets\binary\7za.exe a -t7z -m0=lzma2 -ms=on -mx=9 -md=128m .\dist\March7thAssistant_${{ github.run_number }}.7z .\dist\March7thAssistant_${{ github.run_number }}\
+
+      # 上传压缩包
+      - name: Upload artifact
+        if: steps.check_version.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: March7thAssistant_${{ github.run_number }}.7z
+          path: ./dist/March7thAssistant_${{ github.run_number }}.7z
+          compression-level: 0 # no compression

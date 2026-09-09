@@ -1,0 +1,371 @@
+import os
+import sys
+import argparse
+# 将当前工作目录设置为程序所在的目录，确保无论从哪里执行，其工作目录都正确设置为程序本身的位置，避免路径错误。
+os.chdir(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)else os.path.dirname(os.path.abspath(__file__)))
+
+from utils.dpi import configure_dpi_awareness
+from utils.tasks import AVAILABLE_TASKS
+
+
+configure_dpi_awareness()
+
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(
+        prog='March7th Assistant',
+        description='三月七小助手 - 崩坏：星穹铁道自动化工具 (CLI)',
+        epilog='更多信息请访问: https://m7a.top',
+        add_help=False
+    )
+
+    # 位置参数组
+    positional = parser.add_argument_group('位置参数')
+    positional.add_argument(
+        'task',
+        nargs='?',
+        choices=list(AVAILABLE_TASKS.keys()),
+        metavar='TASK',
+        help='要执行的任务名称（可选，不指定则执行完整运行）'
+    )
+
+    # 可选参数组
+    optional = parser.add_argument_group('可选参数')
+    optional.add_argument(
+        '--no-run-immediately',
+        action='store_true',
+        help='禁用立即运行'
+    )
+    optional.add_argument(
+        '-h', '--help',
+        action='help',
+        help='显示此帮助信息并退出'
+    )
+    optional.add_argument(
+        '-l', '--list',
+        action='store_true',
+        help='列出所有可用的任务'
+    )
+    optional.add_argument(
+        '--workflow-name',
+        metavar='NAME',
+        help='按名称运行流程'
+    )
+    optional.add_argument(
+        '--workflow-step-path',
+        metavar='PATH',
+        help='仅执行指定步骤路径，例如 0/1/2'
+    )
+
+    args = parser.parse_args()
+
+    # 处理 --list 参数
+    if args.list:
+        print("\n可用的任务列表:")
+        print("-" * 40)
+        for task_id, task_name in AVAILABLE_TASKS.items():
+            print(f"  {task_id:<20} {task_name}")
+        print("-" * 40)
+        print("\n使用示例:")
+        print("  启动并执行完整运行:     March7th Assistant.exe main")
+        print("  执行每日实训:           March7th Assistant.exe daily")
+        sys.exit(0)
+
+    if args.task and args.workflow_name:
+        parser.error('不能同时指定 TASK 和 --workflow-name')
+
+    if args.workflow_step_path and not args.workflow_name:
+        parser.error('--workflow-step-path 需要配合 --workflow-name 使用')
+
+    return args
+
+
+args = parse_args()
+
+
+import atexit
+import base64
+import time
+
+if sys.platform == 'win32':
+    import pyuac
+    if not pyuac.isUserAdmin():
+        try:
+            pyuac.runAsAdmin(False)
+            sys.exit(0)
+        except Exception:
+            sys.exit(1)
+
+from module.config import cfg
+from module.logger import log
+from module.notification import notif
+from module.telemetry import telemetry
+from module.notification.notification import NotificationLevel
+from module.ocr import ocr
+from module.workflow import WorkflowRunner, load_workflow_execution_payload
+from utils.screenshot_util import save_error_screenshot
+
+import tasks.game as game
+from module.game import cloud_game
+import tasks.reward as reward
+import tasks.challenge as challenge
+import tasks.version as version
+import tasks.version.app_update as app_update_task
+
+from tasks.daily.daily import Daily
+from tasks.daily.fight import Fight
+from tasks.power.power import Power
+from tasks.weekly.universe import Universe
+from tasks.daily.redemption import Redemption
+from tasks.weekly.currency_wars import CurrencyWars
+from tasks.weekly.divergent_universe import DivergentUniverse
+from tasks.base.genshin_starRail_fps_unlocker import Genshin_StarRail_fps_unlocker
+from tasks.base import screen_test
+
+
+from utils.console import pause_on_error, pause_on_success, pause_always, is_docker_started
+
+telemetry.init(
+    enabled=cfg.get_value("telemetry_enable", True),
+    telemetry_id=cfg.get_value("telemetry_id", ""),
+    telemetry_secret=cfg.get_value("telemetry_secret", ""),
+    version=cfg.version,
+)
+
+
+def first_run():
+    if not is_docker_started() and not cfg.get_value(base64.b64decode("YXV0b191cGRhdGU=").decode("utf-8")):
+        log.error("首次使用请先打开图形界面 March7th Launcher")
+        pause_always()
+        sys.exit(0)
+
+
+def run_main_actions(no_run_immediately=False):
+    is_first_run = no_run_immediately
+    while True:
+        if is_first_run:
+            is_first_run = False
+            game.after_finish_is_loop()
+            continue
+        if cfg.notify_merge:
+            notif.start_batch()
+        telemetry.track_task_start("main")
+        main_start_time = time.time()
+        try:
+            version.start()
+            game.start()
+            Daily.start()
+            reward.start()
+            telemetry.track_task_complete("main", True, time.time() - main_start_time)
+            game.stop(True)
+        except Exception:
+            telemetry.track_task_complete("main", False, time.time() - main_start_time)
+            raise
+
+
+def run_sub_task(action):
+    if action not in ("currencywarstemp", "divergenttemp"):
+        game.start()
+    else:
+        if cfg.cloud_game_enable:
+            if not cloud_game.start_game_process():
+                raise ConnectionError("启动或连接浏览器失败")
+        game.switch_to_game()
+
+    def _run_loop_task_with_telemetry(task_id, task_fn):
+        while True:
+            telemetry.track_task_start(task_id)
+            task_start_time = time.time()
+            try:
+                success = bool(task_fn())
+                telemetry.track_task_complete(task_id, success, time.time() - task_start_time)
+            except Exception:
+                telemetry.track_task_complete(task_id, False, time.time() - task_start_time)
+                raise
+
+    def currencywars(mode=None):
+        war = CurrencyWars()
+        if mode == "loop":
+            _run_loop_task_with_telemetry("currencywarsloop", war.start)
+        elif mode == "temp":
+            war.loop()
+        else:
+            war.start()
+
+    def divergent(mode=None):
+        universe = DivergentUniverse()
+        if mode == "loop":
+            _run_loop_task_with_telemetry("divergentloop", universe.start)
+        elif mode == "temp":
+            universe.loop()
+        else:
+            universe.start()
+
+    sub_tasks = {
+        "routine": Daily.routine,
+        "daily": lambda: (Daily.run(), reward.start()),
+        "power": Power.run,
+        "currencywars": lambda: currencywars(),
+        "currencywarsloop": lambda: currencywars("loop"),
+        "currencywarstemp": lambda: currencywars("temp"),
+        "divergent": lambda: divergent(),
+        "divergentloop": lambda: divergent("loop"),
+        "divergenttemp": lambda: divergent("temp"),
+        "fight": Fight.start,
+        "screen_test": screen_test.run,
+        "universe": lambda: Universe.start(category="universe"),
+        "forgottenhall": lambda: challenge.start("memoryofchaos"),
+        "purefiction": lambda: challenge.start("purefiction"),
+        "apocalyptic": lambda: challenge.start("apocalyptic"),
+        "redemption": Redemption.start
+    }
+    task = sub_tasks.get(action)
+    if task:
+        if action in {"currencywarsloop", "divergentloop"}:
+            task()
+        else:
+            telemetry.track_task_start(action)
+            task_start_time = time.time()
+            try:
+                task()
+                telemetry.track_task_complete(action, True, time.time() - task_start_time)
+            except Exception:
+                telemetry.track_task_complete(action, False, time.time() - task_start_time)
+                raise
+    if action != "screen_test":
+        game.stop(False)
+
+
+def run_sub_task_gui(action):
+    gui_tasks = {
+        "universe_gui": Universe.gui,
+        "fight_gui": Fight.gui
+    }
+    task = gui_tasks.get(action)
+    if task and not task():
+        pause_always()
+    sys.exit(0)
+
+
+def run_sub_task_update(action):
+    update_tasks = {
+        "universe_update": Universe.update,
+        "fight_update": Fight.update,
+        "mobileui_update": Genshin_StarRail_fps_unlocker.update
+    }
+    task = update_tasks.get(action)
+    if task:
+        task()
+    pause_always()
+    sys.exit(0)
+
+
+def run_notify_action():
+    notif.notify(content=cfg.notify_template['TestMessage'], image="./assets/app/images/March7th.jpg", level=NotificationLevel.ALL)
+    pause_always()
+    sys.exit(0)
+
+
+def run_workflow_action(workflow_name: str, workflow_step_path=None):
+    workflow = load_workflow_execution_payload(workflow_name, workflow_step_path)
+    runner = WorkflowRunner(
+        log_callback=lambda message: print(message, flush=True),
+        mirror_to_project_log=False,
+    )
+    return runner.run(workflow)
+
+
+def main(action=None, no_run_immediately=False, workflow_name=None, workflow_step_path=None):
+    first_run()
+    telemetry.track_startup()
+
+    if workflow_name:
+        return run_workflow_action(workflow_name, workflow_step_path)
+
+    # 完整运行
+    if action is None or action == "main":
+        run_main_actions(no_run_immediately)
+
+    # 子任务
+    elif action in ["routine", "daily", "power", "currencywars", "currencywarsloop", "currencywarstemp", "divergent", "divergentloop", "divergenttemp", "fight", "universe", "forgottenhall", "purefiction", "apocalyptic", "redemption", "screen_test"]:
+        run_sub_task(action)
+
+    # 子任务 原生图形界面
+    elif action in ["universe_gui", "fight_gui"]:
+        run_sub_task_gui(action)
+
+    # 子任务 更新项目
+    elif action in ["universe_update", "fight_update", "mobileui_update"]:
+        run_sub_task_update(action)
+
+    elif action == "game":
+        game.start()
+
+    elif action == "app_update":
+        app_update_task.start()
+
+    elif action == "game_update":
+        game.update_via_launcher()
+
+    elif action == "game_pre_download":
+        game.pre_download_via_launcher()
+
+    elif action == "notify":
+        run_notify_action()
+
+    else:
+        log.error(f"未知任务: {action}")
+        pause_on_error()
+        sys.exit(1)
+
+
+# 程序结束时的处理器
+def exit_handler():
+    """注册程序退出时的处理函数，用于清理OCR和调试资源."""
+    telemetry.shutdown()
+    ocr.exit_ocr()
+    # 清理调试叠加层
+    try:
+        from module.automation import auto
+        auto.shutdown_debug()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    try:
+        atexit.register(exit_handler)
+        if args.workflow_name:
+            result = main(
+                no_run_immediately=args.no_run_immediately,
+                workflow_name=args.workflow_name,
+                workflow_step_path=args.workflow_step_path,
+            )
+        elif args.task:
+            result = main(action=args.task, no_run_immediately=args.no_run_immediately)
+        else:
+            result = main(no_run_immediately=args.no_run_immediately)
+        if result is False:
+            sys.exit(1)
+    except KeyboardInterrupt:
+        log.error("发生错误: 手动强制停止")
+        pause_on_error()
+        sys.exit(1)
+    except Exception as e:
+        telemetry.track_error(type(e).__name__, str(e))
+        log.error(cfg.notify_template['ErrorOccurred'].format(error=e))
+        # 保存错误截图
+        screenshot_path = save_error_screenshot(log)
+        # 合并模式下先发送已收集的通知
+        notif.flush_batch()
+        # 发送通知，如果有截图则附带截图
+        notify_kwargs = {
+            'content': cfg.notify_template['ErrorOccurred'].format(error=e),
+            'level': NotificationLevel.ERROR
+        }
+        if screenshot_path:
+            notify_kwargs['image'] = screenshot_path
+        notif.notify(**notify_kwargs)
+        pause_on_error()
+        sys.exit(1)

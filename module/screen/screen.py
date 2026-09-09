@@ -1,0 +1,449 @@
+import sys
+import time
+import json
+import threading
+from collections import deque
+from utils.color import green
+from utils.singleton import SingletonMeta
+from utils.logger.logger import Logger
+from typing import Optional
+from module.automation import auto
+from module.config import cfg
+
+
+class Screen(metaclass=SingletonMeta):
+    """
+    界面管理类
+    """
+
+    SCREEN_MATCH_THRESHOLD = 0.88
+
+    def __init__(self, config_path, logger: Optional[Logger] = None):
+        """
+        初始化界面管理器。
+        :param config_path: 界面配置文件的路径。
+        :param logger: 日志管理器实例，用于记录日志。
+        """
+        self.logger = logger
+        self.current_screen = None  # 当前显示的界面
+        self.current_screen_threshold = 0  # 当前界面的阈值
+        self.screen_map = {}  # 存储界面信息的字典
+        self.wait_screen_change_time = 0.5
+        self.lock = threading.Lock()  # 创建一个锁，用于线程同步
+        self._setup_screens_from_config(config_path)
+
+    def _add_screen(self, id, name, image_path, actions):
+        """
+        添加一个新界面到界面管理器。
+        :param id: 新界面的唯一标识。
+        :param name: 新界面的名称。
+        :param image_path: 用于识别界面的图片路径，可以是字符串或字符串列表（任一匹配即可）。
+        :param actions: 可切换的目标界面及操作序列。
+        """
+        self.screen_map[id] = {'name': name, 'image_path': image_path, 'actions': actions}
+
+    def _setup_screens_from_config(self, config_path):
+        """
+        从配置文件加载界面配置信息。
+        :param config_path: 配置文件路径。
+        """
+        try:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                configs = json.load(file)
+                for config in configs:
+                    self._add_screen(config["id"], config["name"], config["image_path"], config["actions"])
+        except FileNotFoundError:
+            self.logger.error(f"配置文件不存在：{config_path}")
+            raise
+        except Exception as e:
+            self.logger.error(f"配置文件解析失败：{e}")
+            raise
+
+    def _reset_screen_state(self):
+        """
+        重置当前界面状态。
+        """
+        self.current_screen = None
+        self.current_screen_threshold = 0
+
+    def _detect_overlay_monitor_text(self):
+        """
+        通过 OCR 检测是否存在常见帧率/硬件监控悬浮窗文字。
+        :return: 命中的关键词标签列表。
+        """
+        keyword_map = {
+            "FPS": ["fps", "帧率", "framerate", "frame"],
+            "CPU": ["cpu", "处理器", "占用", "usage"],
+            "GPU": ["gpu", "显卡", "vram", "温度", "显存"],
+            "RTSS": ["rtss", "rivatuner", "afterburner", "msi"],
+        }
+
+        try:
+            auto.take_screenshot()
+            auto.perform_ocr()
+            ocr_result = getattr(auto, "ocr_result", []) or []
+            if not ocr_result:
+                return []
+
+            matched = set()
+            for box, (text, confidence) in ocr_result:
+                if not text:
+                    continue
+                normalized_text = text.lower().replace(" ", "")
+                for label, keywords in keyword_map.items():
+                    if any(keyword in normalized_text for keyword in keywords):
+                        matched.add(label)
+
+            return sorted(matched)
+        except Exception as e:
+            self.logger.debug(f"检测监控悬浮窗文本失败：{e}")
+            return []
+
+    def _warn_overlay_monitor_text_if_needed(self):
+        """
+        若检测到常见监控悬浮窗关键词，则给出针对性提示。
+        """
+        matched_labels = self._detect_overlay_monitor_text()
+        if matched_labels:
+            self.logger.warning(
+                f"检测到疑似监控悬浮窗文字：{', '.join(matched_labels)}，这可能导致界面识别失败"
+            )
+            self.logger.warning(
+                "建议关闭帧率/硬件监控悬浮窗（如 FPS、CPU、GPU、RTSS、Afterburner 等）后重试"
+            )
+
+    def _handle_autotry(self):
+        """
+        处理自动重试逻辑，包括按ESC键和处理特定的异常情况。
+        """
+        self._warn_overlay_monitor_text_if_needed()
+        if auto.click_element("稍后再看", "text", take_screenshot=False):
+            self.logger.info("检测到开拓任务前情提要弹窗，已点击稍后再看")
+        else:
+            auto.press_key("esc")
+            self.logger.warning("未识别出任何界面，请确保游戏画面干净，按ESC后重试")
+        time.sleep(2)  # 等待屏幕变化
+
+        auto.take_screenshot()
+        # 处理与服务器断开连接的异常情况
+        if auto.find_element("./assets/images/zh_CN/exception/relogin.png", "image", 0.9, take_screenshot=False):
+            auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9, take_screenshot=False)
+            time.sleep(20)
+
+        # 处理登录异常情况
+        if auto.find_element("./assets/images/zh_CN/exception/retry.png", "image", 0.9, take_screenshot=False):
+            auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9, take_screenshot=False)
+            time.sleep(20)
+
+    def get_current_screen(self, autotry=True, max_retries=10):
+        """
+        通过多次尝试来识别并获取当前界面。
+        :param autotry: 如果自动重试启用，则在未识别到界面时尝试按ESC键。
+        :param max_retries: 最大重试次数。
+        :return: 如果成功识别到界面则返回True，否则返回False。
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        found_event = threading.Event()
+
+        # 定义内部函数用于在线程中识别界面
+        def find_screen(screen_name, screen):
+            if found_event.is_set():
+                return None
+            try:
+                result = self._find_image(
+                    screen['image_path'],
+                    "image_threshold",
+                    self.SCREEN_MATCH_THRESHOLD,
+                    take_screenshot=False,
+                )
+                if result and not found_event.is_set():
+                    with self.lock:
+                        if not self.current_screen or self.current_screen_threshold < result:
+                            self.current_screen = screen_name
+                            self.current_screen_threshold = result
+                    found_event.set()
+                    return screen_name
+            except Exception as e:
+                self.logger.debug(f"识别界面出错：{e}")
+            return None
+
+        if self.current_screen is not None and self._find_image(
+            self.screen_map[self.current_screen]['image_path'],
+            "image_threshold",
+            self.SCREEN_MATCH_THRESHOLD,
+        ):
+            return True
+
+        for i in range(max_retries):
+            auto.take_screenshot()
+            self._reset_screen_state()
+            found_event.clear()
+
+            import psutil
+            mem = psutil.virtual_memory()
+            if mem.available > 2 * 1024**3:
+                executor = ThreadPoolExecutor(max_workers=len(self.screen_map))
+                futures = [executor.submit(find_screen, name, screen) for name, screen in self.screen_map.items()]
+
+                for future in as_completed(futures):
+                    if future.result() is not None:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+                else:
+                    executor.shutdown(wait=False)
+            else:
+                for name, screen in self.screen_map.items():
+                    find_screen(name, screen)
+                    if self.current_screen:
+                        break
+
+            if self.current_screen:
+                return True
+
+            if autotry:
+                self._handle_autotry()
+            else:
+                self.logger.debug("未识别出任何界面，请确保游戏画面干净")
+                break
+
+        self.logger.error("当前界面：未知")
+        return False
+
+    def find_shortest_path(self, start, end):
+        """
+        使用宽度优先搜索（BFS）算法在界面图中查找从 start 到 end 的最短路径。
+        :param start: 起始界面的ID。
+        :param end: 目标界面的ID。
+        :return: 最短路径列表，格式为界面的ID列表。如果不存在路径，则返回 None。
+        """
+        if start == end:
+            # 如果起始界面和目标界面相同，直接返回目标界面
+            return [end]
+
+        visited = set()  # 用于记录已访问的界面
+        queue = deque([(start, [])])  # 队列中存储的元素为(当前界面, 到达当前界面的路径列表)
+
+        while queue:
+            current_screen, path = queue.popleft()  # 取出队列中的第一个元素
+            visited.add(current_screen)  # 标记当前界面为已访问
+
+            for action in self.screen_map[current_screen]['actions']:
+                next_screen = action["target_screen"]
+                if next_screen not in visited:
+                    new_path = path + [current_screen]  # 更新路径
+                    if next_screen == end:
+                        # 如果找到目标界面，返回包含目标界面的完整路径
+                        return new_path + [end]
+                    queue.append((next_screen, new_path))  # 将下一个界面及其路径加入队列
+
+        # 如果遍历完所有可能的路径都没有找到目标界面，返回 None
+        return None
+
+    def can_change_from(self, start_screen, target_screen):
+        """
+        判断是否能从指定界面主动切换到目标界面。
+        """
+        if start_screen not in self.screen_map or target_screen not in self.screen_map:
+            return False
+        return self.find_shortest_path(start_screen, target_screen) is not None
+
+    def get_switchable_screens(self, start_screen="main", include_start=True):
+        """
+        获取从指定界面可主动切换到的所有界面，按 BFS 顺序返回。
+        :return: [(screen_id, screen_name), ...]
+        """
+        if start_screen not in self.screen_map:
+            return []
+
+        visited = {start_screen}
+        queue = deque([start_screen])
+        result = []
+
+        if include_start:
+            result.append((start_screen, self.get_name(start_screen)))
+
+        while queue:
+            current_screen = queue.popleft()
+            for action in self.screen_map[current_screen]['actions']:
+                next_screen = action.get("target_screen")
+                if next_screen in visited or next_screen not in self.screen_map:
+                    continue
+                visited.add(next_screen)
+                result.append((next_screen, self.get_name(next_screen)))
+                queue.append(next_screen)
+
+        return result
+
+    def get_name(self, id):
+        """
+        根据界面ID获取界面名称。
+        :param id: 界面的唯一标识。
+        :return: 界面的名称。
+        """
+        return self.screen_map[id]["name"]
+
+    def check_screen(self, target_screen):
+        """
+        检查当前界面是否是指定的目标界面。
+
+        :param target_screen: 目标界面的标识符。
+        :return: 如果当前界面是目标界面，则返回True；否则返回False。
+        """
+        if self._find_image(self.screen_map[target_screen]['image_path'], "image", self.SCREEN_MATCH_THRESHOLD):
+            # 如果找到了目标界面的图像，则更新当前界面状态为目标界面
+            self.current_screen = target_screen
+            return True
+        return False
+
+    def _find_image(self, image_path, find_type, threshold=None, **kwargs):
+        """
+        支持 image_path 为字符串或字符串列表（或元组）。
+        当 image_path 为列表时，对列表内的图片进行“或”匹配：
+        - 对于 'image_threshold' 类型，返回最高的匹配阈值（float）或 None。
+        - 对于其他类型，返回第一个被匹配到的结果（与 auto.find_element 的返回值一致）或 None。
+        其他参数会透传给 auto.find_element。
+        """
+        try:
+            if isinstance(image_path, (list, tuple)):
+                best = None
+                for p in image_path:
+                    try:
+                        r = auto.find_element(p, find_type, threshold, **kwargs)
+                    except Exception as e:
+                        self.logger.debug(f"查找图片 {p} 出错: {e}")
+                        r = None
+                    if r:
+                        if find_type == 'image_threshold':
+                            if best is None or r > best:
+                                best = r
+                        else:
+                            return r
+                return best
+            else:
+                return auto.find_element(image_path, find_type, threshold, **kwargs)
+        except Exception as e:
+            self.logger.debug(f"_find_image 出错: {e}")
+            return None
+
+    def log_and_raise(self, log_message, error_message):
+        """
+        记录错误日志并抛出异常
+        """
+        self.logger.error(log_message)
+        # self.logger.error("如果游戏是从本地启动：")
+        if not cfg.cloud_game_enable:
+            self.logger.error("请关闭帧率监控HUD、微星小飞机、游戏加加、HDR或N卡游戏滤镜等等任何可能影响游戏画面的软件")
+            self.logger.error("你可以通过 工具箱-游戏截图 判断当前游戏画面是否被正确获取")
+        # self.logger.error("如果是云·星穹铁道：")
+        else:
+            self.logger.error("使用云·星穹铁道请确保网络正常，浏览器能正常加载游戏画面")
+        raise RuntimeError(error_message)
+
+    def ensure_current_screen_is_clean(self):
+        """
+        确保当前游戏界面可以被正确识别
+        """
+        if not self.get_current_screen():
+            self.log_and_raise("无法识别当前游戏界面", "无法识别当前游戏界面")
+
+    def get_operations(self, current_screen, next_screen):
+        """
+        获取从当前界面到下一个界面的操作序列
+        """
+        return [action["actions_list"] for action in self.screen_map[current_screen]['actions'] if action["target_screen"] == next_screen][0]
+
+    def get_timeout_operations(self, current_screen, next_screen):
+        """
+        获取从当前界面切换到下一个界面超时后的操作序列（可选）
+        """
+        for action in self.screen_map[current_screen]['actions']:
+            if action["target_screen"] == next_screen:
+                return action.get("actions_list_on_timeout", [])
+        return []
+
+    def perform_operations(self, operations):
+        """
+        执行一系列操作，每个操作是一个可执行的函数调用字符串
+        :param operations: 包含可执行函数调用的字符串列表
+        """
+        for operation_str in operations:
+            try:
+                # 使用eval执行字符串表示的函数调用，提供配置变量的访问
+                eval(
+                    operation_str,
+                    {
+                        "__builtins__": __builtins__,
+                        "auto": auto,
+                        "time": time,
+                        "cfg": cfg,
+                    },
+                )
+                self.logger.debug("执行了一个操作")
+            except Exception as e:
+                self.logger.debug(f"未知的操作: {e}")
+
+    def wait_for_screen_change(self, next_screen, max_recursion=2, timeout_operations=None):
+        """
+        等待界面切换，如果未成功则根据重试次数决定是否重试
+        :param timeout_operations: 超时后执行的可选操作列表，执行后会再次检测界面
+        """
+        for _ in range(20):
+            self.logger.debug(f"等待：{self.get_name(next_screen)}")
+            if self.check_screen(next_screen):
+                self.logger.info(f"切换到：{green(self.get_name(next_screen))}")
+                time.sleep(self.wait_screen_change_time)
+                break
+            time.sleep(0.5)
+        else:
+            if timeout_operations:
+                self.logger.warning(f"切换到 {self.get_name(next_screen)} 超时，执行超时操作后重新检测")
+                self.perform_operations(timeout_operations)
+                for _ in range(20):
+                    self.logger.debug(f"等待：{self.get_name(next_screen)}")
+                    if self.check_screen(next_screen):
+                        self.logger.info(f"切换到：{green(self.get_name(next_screen))}")
+                        time.sleep(self.wait_screen_change_time)
+                        return
+                    time.sleep(0.5)
+            self.wait_screen_change_time = 1
+            if max_recursion > 0:
+                self.logger.warning(f"切换到 {self.get_name(next_screen)} 超时，准备重试")
+                self.change_to(next_screen, max_recursion=max_recursion - 1)
+            else:
+                self.log_and_raise(f"无法切换到 {self.get_name(next_screen)}", "无法切换到指定游戏界面")
+
+    def _switch_screen(self, current_screen, next_screen, max_recursion):
+        """
+        执行从当前界面到下一个界面的切换操作，并处理重试逻辑
+        """
+        operations = self.get_operations(current_screen, next_screen)
+        timeout_operations = self.get_timeout_operations(current_screen, next_screen)
+        self.perform_operations(operations)
+        self.wait_for_screen_change(next_screen, max_recursion, timeout_operations or None)
+
+    def _navigate_through_path(self, path, max_recursion):
+        """
+        沿着找到的路径导航，执行切换操作
+        """
+        count = len(path) - 1
+        if count:
+            self.logger.info(f"当前界面：{green(self.get_name(self.current_screen))}")
+            for i in range(count):
+                self._switch_screen(path[i], path[i + 1], max_recursion)
+
+    def change_to(self, target_screen, max_recursion=2):
+        """
+        切换到目标界面，如果失败则退出进程
+        :param target_screen: 目标界面
+        :param max_recursion: 重试次数
+        """
+
+        self.ensure_current_screen_is_clean()
+
+        path = self.find_shortest_path(self.current_screen, target_screen)
+        if not path:
+            self.log_and_raise(f"无法从 {self.get_name(self.current_screen)} 切换到 {self.get_name(target_screen)}", "无法切换到指定游戏界面")
+
+        self._navigate_through_path(path, max_recursion)
+        self.current_screen = target_screen
