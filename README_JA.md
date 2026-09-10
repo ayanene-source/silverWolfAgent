@@ -1,4 +1,4 @@
-# 銀狼 Agent 学習版
+# silverWolf Agent 
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -60,4 +60,3 @@ $env:DEEPSEEK_API_KEY = "あなたの API Key"
 
 このリポジトリは [moesnow/March7thAssistant](https://github.com/moesnow/March7thAssistant) の派生作品であり、[GNU GPL v3.0](LICENSE) の下で配布されます。元プロジェクトとそのサブモジュールには、それぞれの著者、著作権表示、ライセンスがあります。利用、改変、再配布の際は、これらの表示を保持し、該当するライセンスに従ってください。
 
-本プロジェクトは、miHoYo、HoYoverse、および『崩壊：スターレイル』とは一切関係ありません。
