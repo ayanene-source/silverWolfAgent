@@ -1,4 +1,4 @@
-# 银狼 Agent 学习版
+# SilverWolf Agent
 
 [简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
@@ -17,7 +17,7 @@
 
 ## 当前边界
 
-这是学习项目，不是独立的游戏自动化产品。Agent 只能调用白名单中的工具，不能执行任意 Python、文件或系统命令；目前也不会代替用户执行未开放的游戏任务。
+Agent 只能调用白名单中的工具，不能执行任意 Python、文件或系统命令；目前也不会代替用户执行未开放的游戏任务。
 
 使用自动化功能前，请自行了解游戏服务条款及可能的账号风险。
 
@@ -59,5 +59,3 @@ $env:DEEPSEEK_API_KEY = "你的 API Key"
 ## 致谢与许可
 
 本仓库是 [moesnow/March7thAssistant](https://github.com/moesnow/March7thAssistant) 的衍生作品，并继续遵循 [GNU GPL v3.0](LICENSE)。原项目及其子模块拥有各自的作者、版权声明和许可证；使用、修改或再发布时，请保留这些声明并遵守对应许可。
-
-本项目与米哈游、HoYoverse 及《崩坏：星穹铁道》无关联。
